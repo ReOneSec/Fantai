@@ -5,8 +5,8 @@ import os
 from datetime import datetime, timedelta
 
 # Bot token and admin ID
-BOT_TOKEN = "7599030665:AAENVzRJELwgIgX63VxZ4SFfgJN-XNdVdqA"
-ADMIN_ID = 5718687068
+BOT_TOKEN = ""
+ADMIN_ID = 
 CHANNELS = ["@MrGhostXFF", "@GrayCipherBD"]
 
 bot = telebot.TeleBot(BOT_TOKEN)
