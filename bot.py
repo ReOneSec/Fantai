@@ -137,7 +137,7 @@ def spam_action(message):
 
 def process_spam(msg, user_id):
     target_uid = msg.text.strip()
-    api_url = f"https://mrghost.serv00.net/ff/api.php?uid={target_uid}"
+    api_url = f"https://graycipherbd.serv00.net/FF/spam.php?uid={target_uid}"
     
     try:
         response = requests.get(api_url, timeout=10)
