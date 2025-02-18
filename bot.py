@@ -1,200 +1,168 @@
-import telebot
+import telegram
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import requests
-import json
-import os
-from datetime import datetime, timedelta
 
-# Bot token and admin ID
-BOT_TOKEN = ""
-ADMIN_ID = 
-CHANNELS = ["@MrGhostXFF", "@GrayCipherBD"]
+BOT_TOKEN = '8059718400:AAFIwtQXkQXg9hzS14hM3I2ZebGf_QjM2iQ'
+ADMIN_ID = 7969253195
 
-bot = telebot.TeleBot(BOT_TOKEN)
+# Data storage
+user_data = {}
+redeem_codes = {}
+live_member_count = 0
 
-# Paths for JSON files
-USER_DB = "users.json"
-REDEEM_DB = "redeem.json"
 
-# Initialize JSON databases
-def load_or_create_json(file_path):
-    try:
-        if os.path.exists(file_path):
-            with open(file_path, "r") as f:
-                return json.load(f)
-        else:
-            with open(file_path, "w") as f:
-                json.dump({}, f)
-            return {}
-    except json.JSONDecodeError:
-        print(f"Error: {file_path} contains invalid JSON. Resetting the file.")
-        with open(file_path, "w") as f:
-            json.dump({}, f)
-        return {}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global live_member_count
+    user_id = update.message.from_user.id
+    user_name = update.message.from_user.first_name
+    args = context.args
 
-users = load_or_create_json(USER_DB)
-redeem_data = load_or_create_json(REDEEM_DB)
+    # Handle invite system
+    referrer_id = args[0].replace("Bot", "") if args else None
+    if referrer_id and int(referrer_id) != user_id:
+        if user_id not in user_data:
+            user_data[user_id] = {'credits': 3, 'referrer': int(referrer_id)}
+            user_data[int(referrer_id)]['credits'] += 1
+            await context.bot.send_message(
+                int(referrer_id),
+                "🎉 Someone joined using your invite! You earned +1 credit. 💰"
+            )
 
-# Save JSON data
-def save_json(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=4)
+    if user_id not in user_data:
+        user_data[user_id] = {'credits': 3, 'referrer': None}
+        live_member_count += 1
 
-# Check user subscription
-def check_subscription(user_id):
-    for channel in CHANNELS:
-        status = bot.get_chat_member(channel, user_id).status
-        if status not in ["member", "administrator", "creator"]:
-            return False
-    return True
+    invite_link = f"https://t.me/{context.bot.username}?start=Bot{user_id}"
+    welcome_msg = f"👋 Welcome, {user_name} 🎉\n\n💡 Explore the bot options below.\n__________________________"
 
-# Ensure user exists in database
-def ensure_user(user_id, name):
-    if str(user_id) not in users:
-        users[str(user_id)] = {
-            "name": name,
-            "points": 0,
-            "last_bonus": None,
-            "redeemed_codes": []
-        }
-        save_json(USER_DB, users)
+    keyboard = [
+        [InlineKeyboardButton("🐍 WORM GPT 🐍", callback_data="worm_gpt"),
+         InlineKeyboardButton("💰 CREDIT 💰", callback_data="credit")],
+        [InlineKeyboardButton("🔥 DEV 🔥", url="https://t.me/CSFTEAM3")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-# Add or deduct points
-def add_points(user_id, points):
-    users[str(user_id)]["points"] += points
-    save_json(USER_DB, users)
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup)
 
-def deduct_points(user_id, points):
-    users[str(user_id)]["points"] -= points
-    save_json(USER_DB, users)
 
-# Command: /start
-@bot.message_handler(commands=["start"])
-def welcome_user(message):
-    ensure_user(message.from_user.id, message.from_user.first_name)
-    if check_subscription(message.from_user.id):
-        send_main_menu(message.chat.id)
-    else:
-        markup = telebot.types.InlineKeyboardMarkup()
-        for channel in CHANNELS:
-            markup.add(telebot.types.InlineKeyboardButton("✨ Join Channel ✨", url=f"https://t.me/{channel[1:]}"))
-        bot.send_message(
-            message.chat.id,
-            "🔥 **Welcome to the bot!**\n\nPlease join our channels to unlock the features. 😊",
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
 
-# Show main menu
-def send_main_menu(chat_id):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    buttons = ["👤 My Account", "🎁 Bonus", "💥 Spam", "📩 Contact", "🔑 Redeem Code"]
-    markup.add(*buttons)
-    bot.send_message(chat_id, "**🤯 Thann Kachh, Booyah! 💀**", parse_mode="Markdown", reply_markup=markup)
+    if query.data == "worm_gpt":
+        keyboard = [[InlineKeyboardButton("BACK", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("💬 Ask your query below:", reply_markup=reply_markup)
 
-# My Account Button
-@bot.message_handler(func=lambda msg: msg.text == "👤 My Account")
-def my_account(message):
-    user_data = users.get(str(message.from_user.id), {})
-    if user_data:
-        bot.reply_to(
-            message,
-            f"👤 **Name:** {user_data['name']}\n🔑 **User ID:** {message.from_user.id}\n💰 **Points:** {user_data['points']}",
-            parse_mode="Markdown"
-        )
+    elif query.data == "credit":
+        credits = user_data.get(user_id, {}).get("credits", 0)
+        invite_link = f"https://t.me/{context.bot.username}?start=Bot{user_id}"
+        message = f"💰 Your Credits: {credits}\n\n📊 Total Members: {live_member_count}\n\n" \
+                  f"Invite friends to earn more credits! 🎉\n\n" \
+                  f"Your invite link: [Click Here]({invite_link})"
+        keyboard = [[InlineKeyboardButton("BACK", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode="Markdown")
 
-# Bonus Button
-@bot.message_handler(func=lambda msg: msg.text == "🎁 Bonus")
-def bonus_points(message):
-    user = users.get(str(message.from_user.id))
-    if not user:
-        return
-    last_bonus = user.get("last_bonus")
-    now = datetime.now()
-    if last_bonus and datetime.strptime(last_bonus, "%Y-%m-%d %H:%M:%S") + timedelta(hours=24) > now:
-        bot.reply_to(message, "⚠️ You can only claim your bonus every 24 hours.")
-    else:
-        add_points(message.from_user.id, 50)
-        users[str(message.from_user.id)]["last_bonus"] = now.strftime("%Y-%m-%d %H:%M:%S")
-        save_json(USER_DB, users)
-        bot.reply_to(message, "🎉 **50 bonus points added to your account!**", parse_mode="Markdown")
+    elif query.data == "main_menu":
+        keyboard = [
+            [InlineKeyboardButton("🐍 WORM GPT 🐍", callback_data="worm_gpt"),
+             InlineKeyboardButton("💰 CREDIT 💰", callback_data="credit")],
+            [InlineKeyboardButton("🔥 DEV 🔥", url="https://t.me/CSFTEAM3")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("💡 Back to the main menu. Choose an option below.", reply_markup=reply_markup)
 
-# Contact Button
-@bot.message_handler(func=lambda msg: msg.text == "📩 Contact")
-def contact(message):
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("📨 Contact Us", url="https://t.me/MrGhostXBOT"))
-    bot.send_message(message.chat.id, "💬 **Need help? Contact us below:**", parse_mode="Markdown", reply_markup=markup)
 
-# Spam Button
-@bot.message_handler(func=lambda msg: msg.text == "💥 Spam")
-def spam_action(message):
-    user = users.get(str(message.from_user.id))
-    if user and user["points"] >= 100:
-        msg = bot.reply_to(message, "🔢 **Enter Target Free Fire UID:**", parse_mode="Markdown")
-        bot.register_next_step_handler(msg, process_spam, message.from_user.id)
-    else:
-        bot.reply_to(message, "⚠️ **You need at least 100 points to use this feature.**", parse_mode="Markdown")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    text = update.message.text
 
-def process_spam(msg, user_id):
-    target_uid = msg.text.strip()
-    api_url = f"https://graycipherbd.serv00.net/FF/spam.php?uid={target_uid}"
-    
-    try:
-        response = requests.get(api_url, timeout=10)
-        if response.status_code == 200:
-            deduct_points(user_id, 100)
-            bot.reply_to(msg, f"✅ **Spam request successful!**\n\n💬 **API Response:** `{response.text}`", parse_mode="Markdown")
-        else:
-            bot.reply_to(msg, f"❌ **Failed to process request.**\n\n⚠️ **API Status Code:** {response.status_code}", parse_mode="Markdown")
-    except requests.exceptions.RequestException as e:
-        bot.reply_to(msg, f"❌ **Error:** Could not reach API.\n\n⚠️ **Details:** {e}", parse_mode="Markdown")
-
-# Redeem Code Button
-@bot.message_handler(func=lambda msg: msg.text == "🔑 Redeem Code")
-def redeem_code_handler(message):
-    msg = bot.reply_to(message, "🔑 **Enter your redeem code:**", parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_redeem)
-
-def process_redeem(msg):
-    user_id = str(msg.from_user.id)
-    code = msg.text.strip()
-
-    if user_id not in users:
-        bot.reply_to(msg, "❌ **User data not found. Please try again.**", parse_mode="Markdown")
-        return
-
-    if "redeemed_codes" not in users[user_id]:
-        users[user_id]["redeemed_codes"] = []
-        save_json(USER_DB, users)
-
-    if code in redeem_data and redeem_data[code]["uses"] > 0:
-        if code in users[user_id]["redeemed_codes"]:
-            bot.reply_to(msg, "❌ **You have already used this redeem code.**", parse_mode="Markdown")
-        else:
-            add_points(msg.from_user.id, redeem_data[code]["points"])
-            redeem_data[code]["uses"] -= 1
-            users[user_id]["redeemed_codes"].append(code)
-            save_json(REDEEM_DB, redeem_data)
-            save_json(USER_DB, users)
-            bot.reply_to(msg, "🎉 **Redeem successful! Points added to your account.**", parse_mode="Markdown")
-    else:
-        bot.reply_to(msg, "❌ **Invalid or expired redeem code.**", parse_mode="Markdown")
-
-# Admin Commands
-@bot.message_handler(commands=["createcode"])
-def create_code(message):
-    if message.from_user.id == ADMIN_ID:
+    if user_data.get(user_id, {}).get("credits", 0) > 0:
+        api_url = f"https://ngyt777gworm.tiiny.io/?question={text}"
+        response = requests.get(api_url)
+        
+        # UTF-8 decode and split response if multiple parameters exist
         try:
-            _, code, points, uses = message.text.split()
-            points, uses = int(points), int(uses)
-            redeem_data[code] = {"points": points, "uses": uses}
-            save_json(REDEEM_DB, redeem_data)
-            bot.reply_to(message, f"✅ **Redeem code '{code}' created!**", parse_mode="Markdown")
-        except ValueError:
-            bot.reply_to(message, "⚠️ **Usage:** /createcode <code> <points> <uses>", parse_mode="Markdown")
+            answer = response.content.decode("utf-8").strip()
+            if "\n" in answer:
+                answer = answer.split("\n")[0]  # Take the first meaningful response
+        except:
+            answer = "Error decoding response."
 
-print("✨ Bot is online!")
-try:
-    bot.polling(non_stop=True)
-except Exception as e:
-    print(f"❌ Bot stopped due to an error: {e}")
+        if "```" not in answer and any(tag in answer.lower() for tag in ["<html>", "<code>", "<script>", "function", "class"]):
+            answer = f"```\n{answer}\n```"
+
+        user_data[user_id]['credits'] -= 1
+        new_credits = user_data[user_id]['credits']
+        await update.message.reply_text(f"💡 Answer 💡 \n\n{answer}", parse_mode="Markdown")
+
+        keyboard = [[InlineKeyboardButton("BACK", callback_data="main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if new_credits > 0:
+            await update.message.reply_text(f"Your remaining credits: {new_credits} 💰", reply_markup=reply_markup)
+        else:
+            invite_link = f"https://t.me/{context.bot.username}?start=Bot{user_id}"
+            await update.message.reply_text(f"⚠️ Your credits are over.\n\n"
+                                            f"Invite friends to earn more! 🎉\n\n"
+                                            f"Your invite link: [Click Here]({invite_link})",
+                                            parse_mode="Markdown", reply_markup=reply_markup)
+    else:
+        invite_link = f"https://t.me/{context.bot.username}?start=Bot{user_id}"
+        await update.message.reply_text(f"⚠️ You have no credits left.\n\n"
+                                        f"Invite friends to earn more! 🚀\n\n"
+                                        f"Your invite link: [Click Here]({invite_link})",
+                                        parse_mode="Markdown")
+
+
+async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ You are not authorized to use this command.")
+        return
+
+    try:
+        args = context.args
+        code = args[0]
+        value = int(args[1].strip("()"))
+
+        redeem_codes[code] = value
+        await update.message.reply_text(f"✅ Redeem code `{code}` generated for {value} credits!", parse_mode="Markdown")
+
+    except (IndexError, ValueError):
+        await update.message.reply_text("❌ Invalid format. Use: /redeem <code> (<value>)")
+
+
+async def handle_redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    try:
+        code = context.args[0]
+
+        if code in redeem_codes:
+            value = redeem_codes.pop(code)
+            user_data[user_id]['credits'] += value
+            await update.message.reply_text(f"✅ Redeem successful! Your credits: {user_data[user_id]['credits']} 💰")
+        else:
+            await update.message.reply_text("❌ Invalid or expired redeem code.")
+    except IndexError:
+        await update.message.reply_text("❌ Please provide a redeem code.")
+
+
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("redeem", redeem))
+    application.add_handler(CommandHandler("use_redeem", handle_redeem))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_handler))
+
+    application.run_polling()
+
+
+if __name__ == "__main__":
+    main()
+        
